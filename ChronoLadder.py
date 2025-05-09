@@ -48,6 +48,9 @@ class CLConfig:
 #  Utility losses
 # -----------------------------------------------------------------------------
 
+# NOTE: horizon_contrastive uses one-sample-per-class approximation.
+# For larger batches, consider adding a similarity mask or using InfoNCE with multiple anchors per class.
+
 def horizon_contrastive(latents: List[torch.Tensor]):
     if len(latents) < 2:
         return latents[0].new_zeros([])
