@@ -1,24 +1,26 @@
-"""
-ChronoLadder – reference implementation (PyTorch ≥ 2.1)
--------------------------------------------------------
-A minimal yet reasonably complete scaffold that wires a five‑rung cadence
-memory ladder onto a vanilla transformer (GPT‑2 Medium by default).
-
-✅ Features baked‑in
-• stateful write gate on every rung (prevents memory thrash)
-• slot‑dropout (forces robust routing)
-• orthogonality penalty (avoids latent soup)
-• periodic KL refresh for slow rungs (stops drift/collapse)
-• LayerNorm + projection fuse latents back into model hidden space
-• copy / delayed‑recall toy dataset + simple Trainer loop
-
-🚫 Not production ready – it’s a hackable skeleton for research iteration.
-"""
-
 from __future__ import annotations
 
+"""
+ChronoLadder – Toggle‑able reference implementation (PyTorch ≥ 2.1)
+-------------------------------------------------------------------
+Five‑rung cadence memory ladder over a GPT‑2 Medium backbone.
+
+⚙️  **Config flags**
+    use_tags          – frozen horizon‑ID tags (anti‑soup)              [default=True]
+    use_contrastive   – InfoNCE loss between rungs                      [default=True]
+    use_critic        – slow‑tier latent critics                        [default=False]
+    dropout_p         – slot‑dropout probability                        [default=0.1]
+    tag_dim           – dimensionality of horizon‑ID vectors            [default=32]
+
+The defaults match a "production‑leaning" setup (continuous memory rungs
+with tag disentanglement and advanced write‑gate) while leaving the more
+speculative critic off unless explicitly enabled.
+"""
+
 import math
-from typing import Dict, List, Optional, Tuple
+import random
+import string
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
@@ -27,25 +29,64 @@ from torch.utils.data import DataLoader
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
 
 # -----------------------------------------------------------------------------
+#  Configuration
+# -----------------------------------------------------------------------------
+
+class CLConfig:
+    def __init__(
+        self,
+        tag_dim: int = 32,
+        use_tags: bool = True,
+        use_contrastive: bool = True,
+        use_critic: bool = False,
+        dropout_p: float = 0.1,
+    ):
+        self.tag_dim = tag_dim
+        self.use_tags = use_tags
+        self.use_contrastive = use_contrastive
+        self.use_critic = use_critic
+        self.dropout_p = dropout_p
+
+# -----------------------------------------------------------------------------
 #  Utility losses
 # -----------------------------------------------------------------------------
 
 def orthogonality_loss(latents: List[torch.Tensor]) -> torch.Tensor:
-    """Cheap cosine‑similarity penalty across a list of latents.
-    Returns 0 if <2 latents are provided."""
     if len(latents) < 2:
-        return latents[0].new_zeros(())
-    loss = 0.0
-    pairs = 0
+        return latents[0].new_zeros([])
+    loss, pairs = 0.0, 0
     for i in range(len(latents)):
         for j in range(i + 1, len(latents)):
-            cos = F.cosine_similarity(latents[i], latents[j], dim=-1)
-            loss = loss + cos.mean()
+            loss += F.cosine_similarity(latents[i], latents[j], dim=-1).mean()
             pairs += 1
     return loss / pairs
 
+
+def horizon_contrastive(latents_by_rung: List[torch.Tensor]) -> torch.Tensor:
+    """InfoNCE contrast across rungs (each rung = class)."""
+    anchors = torch.cat(latents_by_rung, 0)
+    logits = (anchors @ anchors.T) * 0.1  # temperature scaling
+    labels = torch.arange(len(latents_by_rung), device=anchors.device)
+    return F.cross_entropy(logits, labels)
+
 # -----------------------------------------------------------------------------
-#  AutoEncoder stub (tiny MLP, replace with Conv/ViT for vision latents)
+#  Critic for slow tiers (optional)
+# -----------------------------------------------------------------------------
+
+class SlowTierCritic(nn.Module):
+    def __init__(self, dim: int):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.Linear(dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        return self.head(z)
+
+# -----------------------------------------------------------------------------
+#  AutoEncoder (tiny MLP stub)
 # -----------------------------------------------------------------------------
 
 class AutoEncoder(nn.Module):
@@ -73,205 +114,178 @@ class AutoEncoder(nn.Module):
 # -----------------------------------------------------------------------------
 
 class MemoryRung(nn.Module):
-    """One cadence rung – maintains its own AE and slots."""
-
     def __init__(
         self,
         name: str,
         cadence: int,
         in_dim: int,
         latent_dim: int,
+        horizon_id: int,
+        cfg: CLConfig,
         slots: int = 1,
-        dropout_p: float = 0.1,
     ):
         super().__init__()
-        self.name = name
-        self.tau = cadence
-        self.slots = slots
-        self.dropout_p = dropout_p
+        self.name, self.tau, self.slots = name, cadence, slots
+        self.cfg = cfg
         self.ae = AutoEncoder(in_dim, latent_dim)
-        self.gate = nn.Linear(in_dim + latent_dim, 1)
+
+        # horizon tag (frozen one‑hot) or zero vector
+        if cfg.use_tags:
+            tag = F.one_hot(torch.tensor(horizon_id), cfg.tag_dim).float()
+        else:
+            tag = torch.zeros(cfg.tag_dim)
+        self.register_buffer("h_tag", tag, persistent=False)
+
+        # advanced two‑layer write gate conditioned on [x, prev, tag]
+        self.write_gate = nn.Sequential(
+            nn.Linear(in_dim + latent_dim + cfg.tag_dim, 64),
+            nn.GELU(),
+            nn.Linear(64, 1),
+        )
+
         self.register_buffer("latents", torch.zeros(slots, latent_dim))
         self.step_counter = 0
 
-    # ---------------------------------------------------------------------
-    #  Helpers
-    # ---------------------------------------------------------------------
-
+    # ---------------------------------------------------------
     def _stateful_write(self, x: torch.Tensor):
         prev = self.latents[0]
         enc = self.ae.encode(x)
-        g = torch.sigmoid(self.gate(torch.cat([x, prev], dim=-1)))
-        new_latent = g * enc + (1 - g) * prev
-        # slot‑dropout during training to encourage fallback behaviour
-        if self.training and torch.rand(1, device=x.device) < self.dropout_p:
-            new_latent = new_latent * 0.0
+        feat = torch.cat([x, prev, self.h_tag], -1)
+        p = torch.sigmoid(self.write_gate(feat))
+        new_latent = p * enc + (1 - p) * prev
+        # slot‑dropout
+        if self.training and torch.rand(1, device=x.device) < self.cfg.dropout_p:
+            new_latent *= 0.0
         self.latents[0] = new_latent.detach()
 
     def _kl_refresh(self):
-        # simple decode‑re‑encode to stop drift (only for slow rungs)
-        decoded = self.ae.decode(self.latents)
-        self.latents.copy_(self.ae.encode(decoded.detach()).detach())
+        with torch.no_grad():
+            decoded = self.ae.decode(self.latents)
+            self.latents.copy_(self.ae.encode(decoded))
 
-    # ---------------------------------------------------------------------
-    #  Public
-    # ---------------------------------------------------------------------
-
-    def should_update(self) -> bool:
-        return self.step_counter % self.tau == 0
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Return latents, optionally update/write/refresh."""
+    # ---------------------------------------------------------
+    def forward(self, x: torch.Tensor):
         self.step_counter += 1
-        if self.should_update():
-            self._stateful_write(x)
-        # KL refresh for slow rungs every 4×tau steps
+        if self.step_counter % self.tau == 0:
+            self._stateful_write(x.detach())
         if self.tau >= 64 and self.step_counter % (self.tau * 4) == 0:
             self._kl_refresh()
-        return self.latents.view(1, -1)  # concat slots
+        return torch.cat([self.h_tag, self.latents.view(-1)], -1)
 
-    # ----------------- Aux losses --------------------------------------
-    def aux_losses(self, target: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # reconstruct latents back to input space
+    # ----------------- Aux losses ----------------------------
+    def aux_losses(self, target: torch.Tensor) -> torch.Tensor:
         recon = self.ae.decode(self.latents)
-        recon_loss = F.mse_loss(recon, target.expand_as(recon))
-        # orthogonality only matters if multi‑slot
-        ortho_loss = (
-            orthogonality_loss([self.latents]) if self.slots > 1 else recon_loss.new_zeros(())
-        )
-        return recon_loss, ortho_loss
+        return F.mse_loss(recon, target.expand_as(recon))
 
 # -----------------------------------------------------------------------------
 #  ChronoLadder LM wrapper
 # -----------------------------------------------------------------------------
 
 class ChronoLadderLM(nn.Module):
-    def __init__(self, backbone_name: str = "gpt2-medium"):
+    def __init__(self, backbone_name: str = "gpt2-medium", cfg: CLConfig | None = None):
         super().__init__()
+        self.cfg = cfg or CLConfig()
         self.backbone = GPT2LMHeadModel.from_pretrained(backbone_name)
-        hidden_dim = self.backbone.config.n_embd
+        h = self.backbone.config.n_embd
+        # build rungs
+        self.rungs = nn.ModuleList([
+            MemoryRung("AE1", 1, h, 256, 0, self.cfg),
+            MemoryRung("AE4", 4, h, 512, 1, self.cfg),
+            MemoryRung("AE16", 16, h, 768, 2, self.cfg, slots=2),
+            MemoryRung("AE64", 64, h, 1024, 3, self.cfg, slots=2),
+            MemoryRung("AE256", 256, h, 2048, 4, self.cfg),
+        ])
+        fused_dim = sum(r.latents.numel() // r.slots + self.cfg.tag_dim for r in self.rungs)
+        self.mem_proj = nn.Sequential(nn.Linear(fused_dim, h), nn.LayerNorm(h))
 
-        self.rungs = nn.ModuleList(
-            [
-                MemoryRung("AE1", 1, hidden_dim, 256),
-                MemoryRung("AE4", 4, hidden_dim, 512),
-                MemoryRung("AE16", 16, hidden_dim, 768, slots=2),
-                MemoryRung("AE64", 64, hidden_dim, 1024, slots=2),
-                MemoryRung("AE256", 256, hidden_dim, 2048),
-            ]
-        )
-        fused_dim = sum(r.latents.numel() // r.slots for r in self.rungs)
-        self.mem_proj = nn.Sequential(
-            nn.Linear(fused_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-        )
+        # critics (optional)
+        if self.cfg.use_critic:
+            self.critics = nn.ModuleDict({
+                r.name: SlowTierCritic(r.latents.size(-1)) for r in self.rungs if r.tau >= 64
+            })
+        else:
+            self.critics = nn.ModuleDict()
 
+    # ---------------------------------------------------------
     def forward(self, input_ids: torch.Tensor, hidden_state: torch.Tensor):
-        # detach hidden so AE losses stay local per step
-        rung_latents = [r(hidden_state.detach()) for r in self.rungs]
-        memory_concat = torch.cat(rung_latents, dim=-1)
-        mem_cond = self.mem_proj(memory_concat)
-        conditioned = hidden_state + mem_cond  # broadcast addition
-        outputs = self.backbone(inputs_embeds=conditioned, labels=input_ids)
-        return outputs.logits, {
-            "task_loss": outputs.loss,
-            "rung_latents": rung_latents,
-        }
-
-# -----------------------------------------------------------------------------
-#  Simple synthetic copy‑task dataset
-# -----------------------------------------------------------------------------
-
-def make_copy_dataset(seq_len: int = 20, delay: int = 128, size: int = 5000):
-    """Generate (prompt, target) pairs for delayed recall."""
-    import random, string
-
-    data = []
-    alphabet = list(string.ascii_lowercase)
-    for _ in range(size):
-        token = random.choice(alphabet)
-        prompt = f"remember {token} then wait {delay} steps " + "x " * delay + "now what?"
-        target = token
-        data.append((prompt, target))
-    return data
-
-class CopyDataset(torch.utils.data.Dataset):
-    def __init__(self, samples: List[Tuple[str, str]], tok: GPT2Tokenizer):
-        self.tok = tok
-        self.samples = samples
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        prompt, target = self.samples[idx]
-        ids = self.tok(prompt, return_tensors="pt").input_ids[0]
-        label_ids = self.tok(target, return_tensors="pt").input_ids[0]
-        return ids, label_ids
+        rung_lat = [r(hidden_state.detach()) for r in self.rungs]
+        mem = self.mem_proj(torch.cat(rung_lat, -1))
+        conditioned = hidden_state + mem
+        out = self.backbone(inputs_embeds=conditioned, labels=input_ids)
+        return out.loss, rung_lat
 
 # -----------------------------------------------------------------------------
 #  Trainer
 # -----------------------------------------------------------------------------
 
-class LadderTrainer:
-    def __init__(
-        self,
-        model: ChronoLadderLM,
-        tokenizer: GPT2Tokenizer,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu",
-    ):
-        self.model = model.to(device)
-        self.tok = tokenizer
-        self.opt = torch.optim.AdamW(self.model.parameters(), lr=3e-5)
-        self.device = device
+class ChronoTrainer:
+    def __init__(self, model: ChronoLadderLM, tok: GPT2Tokenizer, device: str | None = None):
+        self.m = model.to(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.tok = tok
+        self.opt = torch.optim.AdamW(self.m.parameters(), lr=3e-5)
+        self.device = self.m.device
 
-    def step(self, input_ids: torch.Tensor, labels: torch.Tensor):
-        input_ids = input_ids.to(self.device)
-        labels = labels.to(self.device)
+    # -----------------------------------------------------
+    def step(self, prompts: List[str]):
+        ids = self.tok(prompts, return_tensors="pt", padding=True).input_ids.to(self.device)
         with torch.no_grad():
-            hidden = self.model.backbone.transformer.wte(input_ids)
-        logits, info = self.model(input_ids, hidden)
-        task_loss = info["task_loss"]
+            h = self.m.backbone.transformer.wte(ids)
+        lm_loss, rung_lat = self.m(ids, h)
 
-        # aux losses
-        recon_loss = ortho_loss = 0.0
-        for rung in self.model.rungs:
-            r_recon, r_ortho = rung.aux_losses(hidden.mean(dim=1))
-            recon_loss += r_recon
-            ortho_loss += r_ortho
+        # Aux losses
+        recon = sum(r.aux_losses(h.mean(1)) for r in self.m.rungs) * 0.1
+        contrast = 0.0
+        if self.m.cfg.use_contrastive:
+            contrast = horizon_contrastive([l.view(1, -1) for l in rung_lat]) * 0.05
 
-        total = task_loss + 0.1 * recon_loss + 0.01 * ortho_loss
+        critic_loss = 0.0
+        if self.m.cfg.use_critic:
+            for r, lat in zip(self.m.rungs, rung_lat):
+                if r.name in self.m.critics:
+                    critic = self.m.critics[r.name]
+                    critic_loss += F.mse_loss(critic(lat.detach()), torch.zeros_like(critic(lat))) * 0.02
+
+        total = lm_loss + recon + contrast + critic_loss
         total.backward()
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-        self.opt.step()
-        self.opt.zero_grad(set_to_none=True)
+        nn.utils.clip_grad_norm_(self.m.parameters(), 1.0)
+        self.opt.step(); self.opt.zero_grad()
         return {
             "total": total.item(),
-            "task": task_loss.item(),
-            "recon": recon_loss.item(),
-            "ortho": ortho_loss.item(),
+            "task": lm_loss.item(),
+            "recon": recon.item(),
+            "contrast": contrast if isinstance(contrast, float) else contrast.item(),
+            "critic": critic_loss if isinstance(critic_loss, float) else critic_loss.item(),
         }
 
 # -----------------------------------------------------------------------------
-#  Example usage
+#  Synthetic dataset helper
+# -----------------------------------------------------------------------------
+
+def make_copy_dataset(delay: int = 64, size: int = 4000):
+    data, abc = [], list(string.ascii_lowercase)
+    for _ in range(size):
+        t = random.choice(abc)
+        prompt = f"remember {t} then wait {delay} steps " + "x " * delay + "now what?"
+        data.append(prompt)
+    return data
+
+# -----------------------------------------------------------------------------
+#  Quick demo run
 # -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     tok = GPT2Tokenizer.from_pretrained("gpt2-medium")
-    model = ChronoLadderLM()
-    trainer = LadderTrainer(model, tok)
+    cfg = CLConfig()  # defaults: tags+contrastive on, critic off
+    model = ChronoLadderLM(cfg=cfg)
+    trainer = ChronoTrainer(model, tok)
 
-    data = CopyDataset(make_copy_dataset(), tok)
-    loader = DataLoader(data, batch_size=4, shuffle=True, collate_fn=lambda batch: (
-        torch.nn.utils.rnn.pad_sequence([b[0] for b in batch], batch_first=True, padding_value=tok.eos_token_id),
-        torch.nn.utils.rnn.pad_sequence([b[1] for b in batch], batch_first=True, padding_value=-100),
-    ))
-
-    for epoch in range(3):
-        for step, (inp, lbl) in enumerate(loader):
-            metrics = trainer.step(inp, lbl)
-            if step % 50 == 0:
-                print(
-                    f"ep{epoch} step{step} | total {metrics['total']:.3f} "
-                    f"task {metrics['task']:.3f} recon {metrics['recon']:.3f} ortho {metrics['ortho']:.3f}"
-                )
+    dataset = make_copy_dataset()
+    for step in range(1000):
+        batch = random.sample(dataset, k=4)
+        metrics = trainer.step(batch)
+        if step % 100 == 0:
+            print(
+                f"step {step} | total {metrics['total']:.3f} "
+                f"task {metrics['task']:.3f} recon {metrics['recon']:.3f} "
+                f"ctr {metrics['contrast']:.3f} critic {metrics['critic']:.3f}"
+            )
