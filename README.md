@@ -91,3 +91,6 @@ TL;DR engineering heuristics
 
 Wire this in, run the synthetic curriculum, and you’ll watch telephone‑game failure curves flatten overnight. Questions on a specific rung or eval metric? Fire away.
 
+**Freezing rungs.**  
+Need to train only one horizon? Just pass that rung’s parameters to your optimizer (or set
+`requires_grad_(False)` on the others). Latent buffers keep updating; only weights stay frozen.
