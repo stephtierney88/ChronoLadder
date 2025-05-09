@@ -39,6 +39,19 @@ Memory → LM fusion (read path)
     hᵗ ← LayerNorm(W_fuse · concat) + hᵗ_base
     One linear + LN keeps latency sub‑1 ms on GPU.
 
+"""
+🧠 Optional Attention Bridges:
+ChronoLadder supports three bridge modes for latent aggregation between rungs:
+
+    • bridge_type='mlp'        → cheap, fast, 2‑layer MLP over [x‖lower‖tag]
+    • bridge_type='hier_ae'    → compression AE before slow AE (latent bottleneck)
+    • bridge_type='attention'  → query = x, key/val = lower latents (cosine-softmax pool)
+
+Defaults use 'mlp'. To try attention:
+    config = CLConfig(bridge_type='attention')
+"""
+
+
 Optional hierarchical read:
 
 need_long = torch.sigmoid(W_gate * h_t_base).item() > 0.5
