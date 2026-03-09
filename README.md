@@ -1,109 +1,134 @@
+# ChronoLadder
 
-Most LLMs use the Chat History, pass it with updated user text, to generate the Chat History with the updated AI response. 
-However because LLMs are generally frozen models this is effectively baton passing the Chat History repeatedly to 'seem continuous' but this is inherently stateless and as
-as such result in telephone game effects due to that amnesia. It tries its best to infer what it can from the chat history, but various dense unsaid goals, intents, causal threads,
-deeper semantic context is lost at the end of inference. Nothing survives if unsaid.
-There is a need for some kind of mechanism or vehicle for Semantic Continuity. 
+ChronoLadder is a research sketch for semantic continuity across inferences.
 
-Through the years attempts to address this have varied in both framing, perspective, and results.
-Some attempts attempt to evolve the entire state at once.
-Others treat it memory only as retrieval.
-Yet still others attempt to use poorly defined memory blob soups, sometimes using timestamps or time signatures -- but that only gives the system of loosely how old
-some memories are and a loose sense of time. Planning is still fairly unforced.
+The core claim is simple:
 
-Hence the point of ChronoLadder is an attempt at Semantic Continuity.
-The Philosophy being centered around:
+- not all information should update at the same rate
+- not all meaning has the same half-life
+- persistence should be structured by temporal horizon, not flattened into one recurrent soup or re-inferred from chat history every turn
 
-• Semantic continuity--not retrieval
-• Stratify the Memory  (act like a 'filing cabinet' of sorts; though yes we still have time signatures as the 'wristwatch'
-• let shape of scaffold assist gradients, 
-• aux loss w curriculums to assist w shaping rung behavior
+Instead of treating memory as one blob, ChronoLadder splits persistence into semantic horizons that update at different cadences and ideally only move when something actually changes at that scale.
 
-and is happily modular and generally architecture neutral. :3
+## What Is In This Folder
 
+This folder currently has three ladder directions:
 
-a little more technical Deeper‑cut tech notes: 
+- `ChronoLadder.py`
+  - legacy rough sketch
+  - AE-centric ladder over a language-model backbone
+- `chronoladder_v2.py`
+  - 3-rung surprise-gated latent ladder
+  - explicit workspace, cadence prior, bubble-up evidence, and hysteresis
+- `chronoladder_v3_slots.py`
+  - slot-based ladder
+  - anchor reuse with `copy`, `refresh`, `spawn`, and `promote` behavior
 
-| Layer                                    | What happens each inference `t`                                                                                   | Key equations / ops                                                                                              | Why it matters |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------- |
-| **1. Working‑memory rung AE\@1 (τ = 1)** | *Stateful write*<br>`z₁ᵗ ← σ(g)·Enc(xᵗ) + (1–σ(g))·z₁ᵗ⁻¹`<br> • `g = W_g·[xᵗ‖z₁ᵗ⁻¹]`                              | Retains sub‑second intent; avoids “thrash” by interpolating with the previous latent instead of blind overwrite. |                |
-| **2. Episodic rung AE\@4 (τ = 4)**       | On steps divisible by 4:<br>`z₄ᵗ ← Enc([xᵗ‖z₁ᵗ])`                                                                 | Summarises 4‑step bursts (≈ single user turn). Surprise‑gate can veto write if ΔKL below median.                 |                |
-| **3. Short‑term strategy rung AE\@16**   | Always written, no gate (cheap):<br>`z₁₆ᵗ ← Enc([xᵗ‖z₄ᵗ‒₁‖z₁ᵗ])`                                                  | Ensures a coherent 15‑30 s tactical plan; two slots so it can “flip pages”.                                      |                |
-| **4. Mid‑range planner AE\@64**          | Every 64 steps *and* KL‑refresh every 256:<br>`z₆₄ᵗ ← Enc([z₁₆ᵗ‖z₄ᵗ‖z₁ᵗ])`<br>`z₆₄ᵗ = Enc(Dec(z₆₄ᵗ))` (drift fix) | Holds a paragraph‑scale subgoal; KL refresh re‑compresses textified latent to stop semantic slippage.            |                |
-| **5. Long‑horizon anchor AE\@256**       | `t mod 256 == 0` **and** novelty test (`ΔKL > θ`):<br>`z₂₅₆ᵗ ← Enc([z₆₄ᵗ‖z₁₆ᵗ])`                                  | One slot; grows to 2048 d so abstraction isn’t bottlenecked. Acts as latent *goal bias* for the backbone.        |                |
+Supporting docs:
 
-Memory → LM fusion (read path)
+- `TRAINING_SPEC_V2.md`
+  - equations, losses, update rules, and training curriculum for the `v2` ladder
+- `LADDER_COMPARISON.md`
+  - likely behaviors, strengths, weaknesses, and benchmark advice across the three variants
 
-    Concatenate [z₁‖z₄‖z₁₆‖z₆₄‖z₂₅₆] ∈ ℝ¹×6 k
+## Variant Summary
 
-    hᵗ ← LayerNorm(W_fuse · concat) + hᵗ_base
-    One linear + LN keeps latency sub‑1 ms on GPU.
+### 1. Legacy AE Ladder
 
-"""
-🧠 Optional Attention Bridges:
-ChronoLadder supports three bridge modes for latent aggregation between rungs:
+Useful as a rough baseline.
 
-    • bridge_type='mlp'        → cheap, fast, 2‑layer MLP over [x‖lower‖tag]
-    • bridge_type='hier_ae'    → compression AE before slow AE (latent bottleneck)
-    • bridge_type='attention'  → query = x, key/val = lower latents (cosine-softmax pool)
+Pros:
 
-Defaults use 'mlp'. To try attention:
-    config = CLConfig(bridge_type='attention')
-"""
+- simple
+- cheap
+- easy to modify
 
+Cons:
 
-Optional hierarchical read:
+- tends to learn compressed summaries rather than clean invariants
+- weak pressure for role separation across timescales
+- likely to smear multiple latent factors together
 
-need_long = torch.sigmoid(W_gate * h_t_base).item() > 0.5
-latents = concat[:3] if not need_long else concat
+### 2. v2 Surprise-Gated Latent Ladder
 
-Cuts per‑token FLOPs ~30 % in chit‑chat.
-Loss cocktail (per step)
+This is the clearest implementation of the semantic-horizon thesis.
 
-L_total = L_lm + 0.1 Σ L_recon + 0.01 Σ L_ortho + 0.05 L_InfoNCE
+Main ideas:
 
-    Reconstruction keeps each rung invertible.
+- `r0` is fast workspace
+- `r1-r3` are persistent bands
+- cadence acts as an age prior
+- surprise drives writes
+- bubble-up propagates persistent lower-rung mismatch upward
 
-    Orthogonality (only ≥2‑slot rungs) prevents soup.
+This is the best starting point if the question is:
 
-    InfoNCE: positive = same‑dialogue latents, negative = other batch; sharpens slot semantics.
+> does explicit multi-rate latent persistence actually help?
 
-Curriculum ladder
+### 3. v3 Slot Ladder
 
-| Epoch       | Tasks introduced                    | Checks for “promotion”                      |
-| ----------- | ----------------------------------- | ------------------------------------------- |
-| 0‑1 k steps | Copy‑10, delay‑16                   | AE\@1 recon < 0.05                          |
-| 1‑10 k      | Copy‑10, delay‑128, chit‑chat noise | AE\@4 gated writes firing ≥ 30 %            |
-| 10‑50 k     | BabyAI GoToObj‑6                    | AE\@16 recall accuracy ≥ 85 %               |
-| 50‑150 k    | NetHack first‑quest                 | AE\@64 drift < 0.2; refresh keeps KL stable |
-| 150 k→      | GUI Pokémon agent                   | AE\@256 novelty trigger every ≤ 300 s       |
+This is the strongest long-run research bet in the folder.
 
+Main ideas:
 
-Promotion = next rung un‑frozen & aux‑λ ramped from 0→0.2.
+- use slot banks instead of single rung vectors
+- reuse anchors instead of overwriting state
+- promote persistent novelty upward
+- preserve multiple distinct latent entities or schemas at once
 
+This is a better fit than plain compression if the real target is:
 
-Practical GPU math
+- schema reuse
+- multi-object memory
+- interruption recovery
+- continual state without total entanglement
 
-| Config                           | VRAM footprint | Tokens/s on A100 40 GB |
-| -------------------------------- | -------------- | ---------------------- |
-| GPT‑2‑M + 5 rungs fp16           | 5.8 GB         | 2 100                  |
-| Llama‑3‑8B + 5 rungs 8‑bit       | 28 GB          | 310                    |
-| Mistral‑7B‑Instruct + CLIP rungs | 38 GB          | 240                    |
+## Design Thesis
 
+ChronoLadder is trying to solve a specific failure mode in current systems:
 
-Latency bump ≈ +5 % vs. baseline (majority from mem_proj).
-TL;DR engineering heuristics
+- larger context windows improve retrieval
+- they do not automatically improve what should persist
+- current models often recover intent by re-reading tokens, not by carrying explicit structured state between inferences
 
-    Gate bias init −1.0 ⇒ overwrite only on clear novelty.
+The central question is:
 
-    Slow‑rung dim grows ~√τ – avoids capacity choke without brute force.
+> which parts of meaning should remain stable across time, and which should be allowed to move?
 
-    KL‑refresh every ≥ 4 τ – empirically the sweet spot before drift spikes.
+## Current Status
 
-    Slot‑dropout 10 % – enough for robustness; >20 % harms planner recall.
+This repository is a research scaffold, not a production implementation.
 
-Wire this in, run the synthetic curriculum, and you’ll watch telephone‑game failure curves flatten overnight. Questions on a specific rung or eval metric? Fire away.
+The files here are intended to:
 
-**Freezing rungs.**  
-Need to train only one horizon? Just pass that rung’s parameters to your optimizer (or set
-`requires_grad_(False)` on the others). Latent buffers keep updating; only weights stay frozen.
+- make the ideas concrete
+- support ablations
+- provide a path from rough sketch to testable architecture variants
+
+## Suggested Reading Order
+
+1. `README.md`
+2. `LADDER_COMPARISON.md`
+3. `TRAINING_SPEC_V2.md`
+4. `chronoladder_v2.py`
+5. `chronoladder_v3_slots.py`
+
+## Best Near-Term Experiments
+
+- interruption recovery
+- persistent goal carry
+- local scene variation with stable higher-level affordances
+- schema reuse across different surfaces
+- tasks where local details churn but episode or strategy state should remain stable
+
+Pokemon-like navigation is a good fit because it naturally separates:
+
+- local motion and obstacle state
+- current subgoal / episode
+- reusable traversal schemas
+
+## Notes
+
+- The original sketch is preserved because it is still useful as a baseline.
+- `v2` is the best direct test of the semantic-horizon idea.
+- `v3` is the architecture I would personally push further if the core thesis holds.
