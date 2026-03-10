@@ -1,6 +1,6 @@
 from __future__ import annotations
 """
-ChronoLadder v3 – Hierarchical Memory Ladder with surprise‑triggered promotions
+ChronoLadder – Hierarchical Memory Ladder with surprise‑triggered promotions
 (Python ≥ 3.10 · PyTorch ≥ 2.1)
 --------------------------------------------------------------------
 Adds over v2

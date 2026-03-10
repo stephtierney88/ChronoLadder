@@ -10,7 +10,7 @@ This note maps the ChronoLadder variants currently in the project and clarifies 
 
 ## First: What The Names Mean
 
-The names `v1`, `v2`, and `v3` are local project labels for the three current directions in this repo.
+The names `v1`, `v2`, and `v2-b` are local project labels for the three current directions in this repo.
 
 They are not formal published versions.
 
@@ -18,7 +18,7 @@ Current mapping:
 
 - `v1` = `ChronoLadder.py`
 - `v2` = `chronoladder_v2.py`
-- `v3` = `chronoladder_v3_slots.py`
+- `v2-b` = `chronoladder_v2b_slots.py`
 
 ## High-Level View
 
@@ -57,7 +57,7 @@ Closest label:
 - semantic-horizon latent ladder
 - can be linear or full hierarchy
 
-### v3
+### v2-b
 
 Question:
 
@@ -234,11 +234,11 @@ Best use:
 
 - only after linear mode works and you want to test richer cross-scale interaction
 
-## v3: Slot-Based Anchor Ladder
+## v2-b: Slot-Based Anchor Ladder
 
 File:
 
-- `chronoladder_v3_slots.py`
+- `chronoladder_v2b_slots.py`
 
 State form:
 
@@ -275,7 +275,7 @@ The guiding idea is:
 > if it does not, spawn a new one  
 > if it stays important, promote it upward
 
-### Why v3 Exists
+### Why v2-b Exists
 
 The main concern with `v1` and `v2` is that one vector per rung can still smear together multiple latent factors:
 
@@ -284,16 +284,16 @@ The main concern with `v1` and `v2` is that one vector per rung can still smear 
 - two competing goals
 - two distinct episode fragments
 
-`v3` tries to preserve identity structure.
+`v2-b` tries to preserve identity structure.
 
-### What v3 Is Best At
+### What v2-b Is Best At
 
 - reusable schemas across different local scenes
 - multiple concurrent latent objects or patterns
 - interruption recovery where an anchor should be resumed rather than re-derived
 - continual-memory-like behavior without immediate weight changes
 
-### What v3 Is Not
+### What v2-b Is Not
 
 - not pure full hierarchy
 - not pure dense recurrence
@@ -312,19 +312,19 @@ It is best described as:
 | `v1` | one latent per rung | compress current context upward | concat all latents | rough full hierarchy | simplest baseline | blurry summary soup |
 | `v2-linear` | one latent per rung | surprise-gated local upward writes | memory tokens | linear ladder | clean horizon separation | limited multi-entity capacity |
 | `v2-hierarchical` | one latent per rung | surprise-gated all-lower writes | memory tokens | full hierarchy | richer cross-scale access | role collapse risk |
-| `v3` | slot bank per rung | anchor match + refresh/spawn/promote | summary + slot tokens | linear write ladder | identity reuse and schema persistence | hardest to train |
+| `v2-b` | slot bank per rung | anchor match + refresh/spawn/promote | summary + slot tokens | linear write ladder | identity reuse and schema persistence | hardest to train |
 
-## How To Think About v3 Specifically
+## How To Think About v2-b Specifically
 
-`v3` is the most different of the three.
+`v2-b` is the most different of the three.
 
 The best mental model is:
 
 - `v1`: compress
 - `v2`: persist by selective update
-- `v3`: persist by reusing anchors
+- `v2-b`: persist by reusing anchors
 
-That means `v3` is trying to answer a different question:
+That means `v2-b` is trying to answer a different question:
 
 - not only "what should persist?"
 - but also "which persistent thing is this another instance of?"
@@ -348,7 +348,7 @@ Use:
 - `v1` if you want the roughest baseline
 - `v2-linear` if you want the cleanest test of ChronoLadder's core thesis
 - `v2-hierarchical` if you want to test whether richer cross-scale writes help more than they hurt
-- `v3` if you believe identity, reuse, and multi-object persistence are central
+- `v2-b` if you believe identity, reuse, and multi-object persistence are central
 
 ## My Current View
 
@@ -358,7 +358,7 @@ If the goal is scientific clarity:
 
 If the goal is strongest long-run architecture bet:
 
-- push `v3`
+- push `v2-b`
 
 If the goal is just to confirm that persistent latent side-state helps at all:
 

@@ -372,7 +372,7 @@ class SlotRung(nn.Module):
         return torch.einsum("bs,bsd->bd", normalized, state.values)
 
 
-class ChronoSlotLadderV3(nn.Module):
+class ChronoSlotLadderV2B(nn.Module):
     def __init__(self, cfg: ChronoSlotLadderConfig):
         super().__init__()
         self.cfg = cfg
@@ -502,7 +502,7 @@ def promotion_flow_loss(stats: Mapping[str, SlotRungStats]) -> torch.Tensor:
 
 
 def slot_ladder_auxiliary_loss(
-    model: ChronoSlotLadderV3,
+    model: ChronoSlotLadderV2B,
     output: ChronoSlotLadderOutput,
     horizon_targets: Mapping[str, torch.Tensor],
 ) -> Dict[str, torch.Tensor]:

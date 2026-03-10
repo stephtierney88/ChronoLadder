@@ -20,8 +20,8 @@ This folder currently has three ladder directions:
 - `chronoladder_v2.py`
   - 3-rung surprise-gated latent ladder
   - explicit workspace, cadence prior, bubble-up evidence, and hysteresis
-- `chronoladder_v3_slots.py`
-  - slot-based ladder
+- `chronoladder_v2b_slots.py`
+  - slot-based sibling branch of `v2`
   - anchor reuse with `copy`, `refresh`, `spawn`, and `promote` behavior
 
 Supporting docs:
@@ -65,9 +65,9 @@ This is the best starting point if the question is:
 
 > does explicit multi-rate latent persistence actually help?
 
-### 3. v3 Slot Ladder
+### 3. v2-b Slot Ladder
 
-This is the strongest long-run research bet in the folder.
+This is the slot-based sibling branch of `v2`, not a direct successor.
 
 Main ideas:
 
@@ -111,7 +111,7 @@ The files here are intended to:
 2. `LADDER_COMPARISON.md`
 3. `TRAINING_SPEC_V2.md`
 4. `chronoladder_v2.py`
-5. `chronoladder_v3_slots.py`
+5. `chronoladder_v2b_slots.py`
 
 ## Best Near-Term Experiments
 
@@ -131,4 +131,4 @@ Pokemon-like navigation is a good fit because it naturally separates:
 
 - The original sketch is preserved because it is still useful as a baseline.
 - `v2` is the best direct test of the semantic-horizon idea.
-- `v3` is the architecture I would personally push further if the core thesis holds.
+- `v2-b` is the slot-based branch I would personally push further if the core thesis holds.

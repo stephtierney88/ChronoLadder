@@ -170,7 +170,7 @@ Why it matters:
 
 Useful test:
 
-- compare `v2` and `v3` on tasks with multiple concurrent latent objects or reusable task schemas
+- compare `v2` and `v2-b` on tasks with multiple concurrent latent objects or reusable task schemas
 
 ## Prediction 11: Training curves will show usefulness before interpretability
 

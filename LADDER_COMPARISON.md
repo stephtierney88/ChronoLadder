@@ -14,7 +14,7 @@ Current local variants:
 
 - `ChronoLadder.py`: rough AE-centric ladder sketch
 - `chronoladder_v2.py`: 3-rung surprise-gated latent ladder
-- `chronoladder_v3_slots.py`: slot-based ladder with anchor reuse
+- `chronoladder_v2b_slots.py`: slot-based ladder with anchor reuse
 - `TRAINING_SPEC_V2.md`: v2 equations, losses, and curriculum
 
 ## Short Version
@@ -23,7 +23,7 @@ If you want:
 
 - simplest rough scaffold: use the original sketch
 - cleanest test of semantic horizons: use `v2`
-- strongest long-run research bet: use `v3`
+- strongest long-run research bet: use `v2-b`
 
 ## Variant 1: AE-Centric Ladder
 
@@ -101,11 +101,11 @@ Best use:
 - benchmark-oriented development
 - testing whether semantic half-life separation is real
 
-## Variant 3: Slot Ladder With Anchor Reuse
+## Variant 2-b: Slot Ladder With Anchor Reuse
 
 File:
 
-- `chronoladder_v3_slots.py`
+- `chronoladder_v2b_slots.py`
 
 Core idea:
 
@@ -252,4 +252,4 @@ For Variant 3 specifically:
 
 If the question is “what will most quickly show whether ChronoLadder’s thesis has signal,” the answer is Variant 2.
 
-If the question is “what architecture would I rather keep pushing if the thesis is right,” the answer is Variant 3.
+If the question is “what architecture would I rather keep pushing if the thesis is right,” the answer is Variant 2-b.
