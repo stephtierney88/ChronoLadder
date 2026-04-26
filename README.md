@@ -23,6 +23,9 @@ This folder currently has three ladder directions:
 - `chronoladder_v2b_slots.py`
   - slot-based sibling branch of `v2`
   - anchor reuse with `copy`, `refresh`, `spawn`, and `promote` behavior
+- `chronoladder_v2c_hybrid.py`
+  - hybrid latent-slot plus explicit-ledger scaffold
+  - separates implicit continuity from provenance, confidence, expiry, and contradiction
 
 Supporting docs:
 
@@ -30,6 +33,8 @@ Supporting docs:
   - equations, losses, update rules, and training curriculum for the `v2` ladder
 - `LADDER_COMPARISON.md`
   - likely behaviors, strengths, weaknesses, and benchmark advice across the three variants
+- `CHRONOLADDER_HYBRID_VARIANTS.md`
+  - variants to try around slots, ledgers, cross-rung identity, and hybrid readout
 
 ## Variant Summary
 
@@ -83,6 +88,18 @@ This is a better fit than plain compression if the real target is:
 - interruption recovery
 - continual state without total entanglement
 
+### 4. v2-c Hybrid Slot/Ledger Ladder
+
+This branch treats the slot ladder as only half of the memory problem.
+
+Main ideas:
+
+- latent slots preserve implicit task pressure and continuity
+- explicit ledger entries preserve provenance, confidence, expiry, and contradiction
+- the core reads both through memory tokens or cross-attention
+
+This is the practical branch if the system needs both continuity and auditability.
+
 ## Design Thesis
 
 ChronoLadder is trying to solve a specific failure mode in current systems:
@@ -112,6 +129,8 @@ The files here are intended to:
 3. `TRAINING_SPEC_V2.md`
 4. `chronoladder_v2.py`
 5. `chronoladder_v2b_slots.py`
+6. `CHRONOLADDER_HYBRID_VARIANTS.md`
+7. `chronoladder_v2c_hybrid.py`
 
 ## Best Near-Term Experiments
 
@@ -132,3 +151,4 @@ Pokemon-like navigation is a good fit because it naturally separates:
 - The original sketch is preserved because it is still useful as a baseline.
 - `v2` is the best direct test of the semantic-horizon idea.
 - `v2-b` is the slot-based branch I would personally push further if the core thesis holds.
+- `v2-c` is the pragmatic hybrid branch for latent continuity plus explicit warrants.

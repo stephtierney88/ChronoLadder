@@ -19,6 +19,7 @@ Current mapping:
 - `v1` = `ChronoLadder.py`
 - `v2` = `chronoladder_v2.py`
 - `v2-b` = `chronoladder_v2b_slots.py`
+- `v2-c` = `chronoladder_v2c_hybrid.py`
 
 ## High-Level View
 
@@ -74,6 +75,23 @@ Style:
 Closest label:
 
 - slot-based anchor ladder
+
+### v2-c
+
+Question:
+
+> should latent continuity be paired with explicit warrants for provenance, confidence, expiry, and contradiction?
+
+Style:
+
+- latent slot rungs
+- explicit ledger bank
+- ledger-gated writes
+- hybrid memory-token readout
+
+Closest label:
+
+- hybrid slot/ledger ladder
 
 ## What A Linear Ladder Means
 
@@ -313,6 +331,7 @@ It is best described as:
 | `v2-linear` | one latent per rung | surprise-gated local upward writes | memory tokens | linear ladder | clean horizon separation | limited multi-entity capacity |
 | `v2-hierarchical` | one latent per rung | surprise-gated all-lower writes | memory tokens | full hierarchy | richer cross-scale access | role collapse risk |
 | `v2-b` | slot bank per rung | anchor match + refresh/spawn/promote | summary + slot tokens | linear write ladder | identity reuse and schema persistence | hardest to train |
+| `v2-c` | slot banks plus ledger | latent writes plus explicit ledger writes | slot tokens plus ledger tokens | hybrid ladder | continuity plus auditability | disagreement and token clutter |
 
 ## How To Think About v2-b Specifically
 
@@ -349,6 +368,7 @@ Use:
 - `v2-linear` if you want the cleanest test of ChronoLadder's core thesis
 - `v2-hierarchical` if you want to test whether richer cross-scale writes help more than they hurt
 - `v2-b` if you believe identity, reuse, and multi-object persistence are central
+- `v2-c` if you need explicit correction, confidence, expiry, contradiction, and provenance
 
 ## My Current View
 
@@ -359,6 +379,10 @@ If the goal is scientific clarity:
 If the goal is strongest long-run architecture bet:
 
 - push `v2-b`
+
+If the goal is practical agent memory:
+
+- push `v2-c`
 
 If the goal is just to confirm that persistent latent side-state helps at all:
 

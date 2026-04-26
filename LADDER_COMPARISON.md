@@ -15,6 +15,7 @@ Current local variants:
 - `ChronoLadder.py`: rough AE-centric ladder sketch
 - `chronoladder_v2.py`: 3-rung surprise-gated latent ladder
 - `chronoladder_v2b_slots.py`: slot-based ladder with anchor reuse
+- `chronoladder_v2c_hybrid.py`: slot ladder plus explicit ledger scaffold
 - `TRAINING_SPEC_V2.md`: v2 equations, losses, and curriculum
 
 ## Short Version
@@ -24,6 +25,7 @@ If you want:
 - simplest rough scaffold: use the original sketch
 - cleanest test of semantic horizons: use `v2`
 - strongest long-run research bet: use `v2-b`
+- most practical audit-ready branch: use `v2-c`
 
 ## Variant 1: AE-Centric Ladder
 
@@ -143,38 +145,75 @@ Best use:
 - agent memory and persistent task state
 - environments with reusable structures across different scenes
 
+## Variant 2-c: Hybrid Slot/Ledger Ladder
+
+File:
+
+- `chronoladder_v2c_hybrid.py`
+
+Core idea:
+
+- latent slots preserve implicit continuity
+- an explicit ledger preserves warrants: provenance, confidence, expiry, contradiction, and corrections
+- memory-token or cross-attention readout exposes both to the core
+
+What it is good at:
+
+- auditability
+- correction persistence
+- contradiction handling
+- hybrid latent/text memory experiments
+
+Likely learned behavior:
+
+- latent rungs carry task pressure and behavioral continuity
+- ledger entries carry explicit facts, decisions, trust, and expiry
+- ledger bias can suppress or redirect bad latent writes
+
+Main failure modes:
+
+- ledger over-trust can freeze mistaken state
+- latent slots and ledger entries can disagree
+- too many ledger tokens can become long-context clutter
+
+Best use:
+
+- practical agent memory
+- user correction and audit trails
+- testing whether hybrid memory beats latent-only or text-only memory
+
 ## Side-By-Side Expectations
 
 ### If the task is simple delayed recall
 
 - Variant 1 may already look decent
 - Variant 2 should be more stable under distractors
-- Variant 3 may be overkill
+- Variant 2-b may be overkill
 
 ### If the task requires interruption recovery
 
 - Variant 1 will likely degrade first
 - Variant 2 should recover better if the right rung held the task phase
-- Variant 3 should recover best if the interruption does not destroy slot-anchor identity
+- Variant 2-b should recover best if the interruption does not destroy slot-anchor identity
 
 ### If the task has repeated schemas with changing local detail
 
 - Variant 1 may memorize averages
 - Variant 2 may learn a slower schema latent if training is good
-- Variant 3 is most naturally aligned because slot reuse can preserve schema anchors
+- Variant 2-b is most naturally aligned because slot reuse can preserve schema anchors
 
 ### If the task has many simultaneous latent objects
 
 - Variant 1 is weakest
 - Variant 2 is limited by one-vector-per-rung pressure
-- Variant 3 is the natural fit
+- Variant 2-b is the natural fit
 
 ## Expected Ablation Results
 
 ### Remove surprise
 
 - Variant 2 becomes cadence-driven clock memory
-- Variant 3 spawns or refreshes on weak heuristics instead of semantics
+- Variant 2-b spawns or refreshes on weak heuristics instead of semantics
 
 Expected symptom:
 
@@ -183,7 +222,7 @@ Expected symptom:
 ### Remove cadence
 
 - Variant 2 writes become too reactive
-- Variant 3 may over-refresh frequently matched slots
+- Variant 2-b may over-refresh frequently matched slots
 
 Expected symptom:
 
@@ -192,7 +231,7 @@ Expected symptom:
 ### Remove bubble-up
 
 - Variant 2 misses slow changes between write opportunities
-- Variant 3 under-promotes persistent novelty
+- Variant 2-b under-promotes persistent novelty
 
 Expected symptom:
 
@@ -201,7 +240,7 @@ Expected symptom:
 ### Remove redundancy / diversity penalties
 
 - Variant 1 and Variant 2 develop band overlap
-- Variant 3 develops duplicate anchors
+- Variant 2-b develops duplicate anchors
 
 ## What To Benchmark
 
@@ -223,7 +262,8 @@ Pokemon-like tasks are useful because they naturally separate:
 
 1. Use Variant 1 only as a rough sanity check.
 2. Build proper evaluations around Variant 2.
-3. Move to Variant 3 if evaluations show you need distinct persistent anchors, schema reuse, or multi-object memory.
+3. Move to Variant 2-b if evaluations show you need distinct persistent anchors, schema reuse, or multi-object memory.
+4. Move to Variant 2-c if correction, auditability, contradiction, and provenance start mattering.
 
 ## What To Watch During Training
 
@@ -240,7 +280,7 @@ For Variant 2 specifically:
 - bubble magnitude by rung
 - correlation between adjacent rung states
 
-For Variant 3 specifically:
+For Variant 2-b specifically:
 
 - active slot count per rung
 - slot reuse rate
@@ -248,8 +288,18 @@ For Variant 3 specifically:
 - promotion rate
 - duplicate-slot similarity
 
+For Variant 2-c specifically:
+
+- ledger write rate
+- contradiction rate
+- expiry calibration
+- latent / ledger disagreement
+- correction persistence
+
 ## My Current Bet
 
 If the question is “what will most quickly show whether ChronoLadder’s thesis has signal,” the answer is Variant 2.
 
 If the question is “what architecture would I rather keep pushing if the thesis is right,” the answer is Variant 2-b.
+
+If the question is “what architecture starts to look like a deployable memory system,” the answer is Variant 2-c.
